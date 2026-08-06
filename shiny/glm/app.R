@@ -232,8 +232,10 @@ ui <- fluidPage(
       tags$h4("2. Predictors"),
       sliderInput("n_x", "Nr of distinct values of \\(x_{i2}\\)",
                   min = 1, max = 10, value = 6, step = 1),
-      sliderInput("x_range", "Range of \\(x_{i2}\\)",
-                  min = -5, max = 10, value = c(0, 5), step = 0.5),
+      fluidRow(
+        column(6, numericInput("x_min", "Smallest \\(x_{i2}\\)", value = 0, step = 0.5)),
+        column(6, numericInput("x_max", "Largest \\(x_{i2}\\)",  value = 5, step = 0.5))
+      ),
       sliderInput("n_rep", "Replicates per predictor value",
                   min = 1, max = 50, value = 10, step = 1),
       checkboxInput("use_factor", "Add a 2-level factor (levels A and B)", value = FALSE),
@@ -324,8 +326,13 @@ server <- function(input, output, session) {
   })
 
   x_values <- reactive({
-    r <- input$x_range
-    if (input$n_x == 1) r[1] else seq(r[1], r[2], length.out = input$n_x)
+    lo <- input$x_min
+    hi <- input$x_max
+    validate(need(isTRUE(is.finite(lo)), "Fill in the smallest value of x."))
+    if (input$n_x == 1) return(lo)
+    validate(need(isTRUE(is.finite(hi)) && hi > lo,
+                  "The largest value of x has to be bigger than the smallest one."))
+    seq(lo, hi, length.out = input$n_x)
   })
 
   # Spacing between neighbouring x values: sets how wide a distribution may be.
