@@ -247,10 +247,9 @@ ui <- fluidPage(
 
       tags$hr(),
       tags$h4("3. Free parameters"),
-      sliderInput("beta1", "\\(\\beta_1\\) (intercept)", min = -5, max = 5,
-                  value = 0.5, step = 0.1),
-      sliderInput("beta2", "\\(\\beta_2\\) (effect of \\(x_{i2}\\))", min = -5, max = 5,
-                  value = 0.4, step = 0.1),
+      numericInput("beta1", "\\(\\beta_1\\) (intercept)", value = 0.5, step = 0.05),
+      numericInput("beta2", "\\(\\beta_2\\) (effect of \\(x_{i2}\\))",
+                   value = 0.4, step = 0.05),
       conditionalPanel(
         "input.use_factor == true",
         sliderInput("beta3", "\\(\\beta_3\\) (effect of level B)", min = -5, max = 5,
@@ -320,6 +319,8 @@ server <- function(input, output, session) {
   beta <- reactive({
     use_f <- isTRUE(input$use_factor)
     use_i <- use_f && isTRUE(input$use_interaction)
+    validate(need(isTRUE(is.finite(input$beta1)), "Fill in a value for beta_1."))
+    validate(need(isTRUE(is.finite(input$beta2)), "Fill in a value for beta_2."))
     b3 <- if (use_f && !is.null(input$beta3)) input$beta3 else 0
     b4 <- if (use_i && !is.null(input$beta4)) input$beta4 else 0
     c(input$beta1, input$beta2, b3, b4)
