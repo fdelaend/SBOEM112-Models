@@ -160,6 +160,17 @@ pick_x <- function(xv, k) {
   xv[unique(round(seq(1, length(xv), length.out = k)))]
 }
 
+# The true mean mu_i over a fine grid of x, for the mean line.
+mean_curve <- function(x_grid, beta, dist_key, pars, use_factor) {
+  groups <- if (use_factor) c("A", "B") else "A"
+  g   <- expand.grid(x_i2 = x_grid, group = groups,
+                     KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+  ind <- as.numeric(g$group == "B")
+  X   <- cbind(1, g$x_i2, ind, g$x_i2 * ind)
+  g$mu_i <- DISTRIBUTIONS[[dist_key]]$linkinv(as.numeric(X %*% beta), pars)
+  g
+}
+
 # The true distribution of y_i at selected x values, ready to be drawn
 # sideways: each shape runs from its baseline at x0 out to x0 + width.
 distribution_shapes <- function(x_at, beta, dist_key, pars, use_factor, spacing) {
@@ -339,6 +350,16 @@ server <- function(input, output, session) {
     res
   })
 
+  # The mean line, only meaningful with more than one x value.
+  curve_df <- reactive({
+    xv <- x_values()
+    if (length(xv) < 2) return(NULL)
+    res <- mean_curve(seq(min(xv), max(xv), length.out = 200),
+                      beta(), input$dist, pars(), isTRUE(input$use_factor))
+    validate(need(all(is.finite(res$mu_i)) && max(res$mu_i) < 1e6, BLOWUP_MSG))
+    res
+  })
+
   # -- the model, written in course notation, updating with the choices ------
   output$model_box <- renderUI({
     use_f <- isTRUE(input$use_factor)
@@ -368,13 +389,15 @@ server <- function(input, output, session) {
   output$plot_note <- renderUI({
     bits <- character(0)
     if (input$show %in% c("data", "both"))
-      bits <- c(bits, paste("Points are the simulated \\(y_i\\), jittered horizontally",
-                            "so replicates are visible."))
+      bits <- c(bits, paste("Points are the simulated \\(y_i\\); replicates at the same",
+                            "\\(x_{i2}\\) sit on top of each other."))
     if (input$show %in% c("dens", "both"))
       bits <- c(bits, paste(
         "Each sideways shape is the true distribution of \\(y_i\\) at that value of",
         "\\(x_{i2}\\), drawn from its baseline to the right. All shapes share one",
-        "scale, so their widths are comparable. The dot marks the mean \\(\\mu_i\\)."))
+        "scale, so their widths are comparable."))
+    if (input$n_x > 1)
+      bits <- c(bits, "The line traces the true mean \\(\\mu_i\\).")
     withMathJax(tags$p(style = "color:#777; font-size:90%;", paste(bits, collapse = " ")))
   })
 
@@ -432,26 +455,28 @@ server <- function(input, output, session) {
         }
       }
 
-      # the mean
+    }
+
+    # -- the true mean mu_i -------------------------------------------------
+    cd <- curve_df()
+    if (!is.null(cd)) {
       p <- if (use_f) {
-        p + geom_point(data = base, aes(x = x0, y = mu, colour = group), size = 2.4)
+        p + geom_line(data = cd, aes(x = x_i2, y = mu_i, colour = group),
+                      linewidth = 1)
       } else {
-        p + geom_point(data = base, aes(x = x0, y = mu), size = 2.4,
-                       colour = GROUP_COLS[["A"]])
+        p + geom_line(data = cd, aes(x = x_i2, y = mu_i),
+                      linewidth = 1, colour = GROUP_COLS[["A"]])
       }
     }
 
     # -- the simulated data -------------------------------------------------
     if (show_pts) {
-      d  <- sim()
-      jw <- if (input$n_x > 1) spacing() * 0.12 else 0.05
+      d <- sim()
       p <- if (use_f) {
         p + geom_point(data = d, aes(x = x_i2, y = y_i, colour = group),
-                       position = position_jitter(width = jw, height = 0, seed = 1),
                        alpha = 0.55, size = 2)
       } else {
         p + geom_point(data = d, aes(x = x_i2, y = y_i),
-                       position = position_jitter(width = jw, height = 0, seed = 1),
                        alpha = 0.55, size = 2, colour = GROUP_COLS[["A"]])
       }
     }
