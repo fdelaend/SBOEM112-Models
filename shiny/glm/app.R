@@ -273,7 +273,7 @@ ui <- fluidPage(
       width = 4,
 
       tags$h4("1. Random component"),
-      selectInput("dist", "Distribution \\(D\\)", choices = DIST_CHOICES),
+      selectInput("dist", "Distribution", choices = DIST_CHOICES),
       conditionalPanel(
         "input.dist == 'normal'",
         sliderInput("sigma", "\\(\\sigma\\) (residual sd)", min = 0.05, max = 5,
