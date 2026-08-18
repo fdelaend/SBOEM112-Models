@@ -112,6 +112,11 @@ DISTRIBUTIONS <- list(
 DIST_CHOICES <- setNames(names(DISTRIBUTIONS), vapply(DISTRIBUTIONS, `[[`, "", "label"))
 GROUP_COLS   <- c(A = "#0072B2", B = "#D55E00")
 
+# Deep-sea fish survey (Bailey et al. 2009): total abundance per site against
+# mean depth, for two sampling periods. Used as a real design: when the user
+# switches it on, x_i2 comes from the observed depths instead of from a grid.
+FISH <- read.csv("fish-bailey.csv")
+
 # Build the design: distinct x values x (optional) 2-level factor x replicates.
 # Columns use the course notation: x_i1 = 1 (intercept), x_i2 = the continuous
 # predictor, x_i3 = indicator for level B, x_i4 = the interaction.
@@ -124,6 +129,25 @@ build_design <- function(x_values, use_factor, n_rep) {
     KEEP.OUT.ATTRS   = FALSE,
     stringsAsFactors = FALSE
   )
+  d <- d[order(d$x, d$group, d$replicate), , drop = FALSE]
+  d$x_i1 <- 1
+  d$x_i2 <- d$x
+  d$x_i3 <- as.numeric(d$group == "B")
+  d$x_i4 <- d$x_i2 * d$x_i3
+  rownames(d) <- NULL
+  d
+}
+
+# Same thing, but the design comes from the fish survey: one row per observed
+# site, x_i2 = the depth at which it was sampled, and the factor = the period.
+build_design_from_data <- function(dat, use_factor, n_rep) {
+  d <- do.call(rbind, lapply(seq_len(n_rep), function(r) {
+    data.frame(replicate = r,
+               group = if (use_factor) ifelse(dat$period == 1, "A", "B") else "A",
+               x     = dat$depth_km,
+               y_obs = dat$abundance,
+               stringsAsFactors = FALSE)
+  }))
   d <- d[order(d$x, d$group, d$replicate), , drop = FALSE]
   d$x_i1 <- 1
   d$x_i2 <- d$x
@@ -149,6 +173,7 @@ simulate_glm <- function(design, beta, dist_key, pars) {
     mu_i  = mu,
     var_i = spec$variance(mu, pars),
     y_i   = spec$rand(mu, pars),
+    y_obs = if (is.null(design$y_obs)) NA_real_ else design$y_obs,
     stringsAsFactors = FALSE
   )
 }
@@ -230,11 +255,23 @@ ui <- fluidPage(
 
       tags$hr(),
       tags$h4("2. Predictors"),
-      sliderInput("n_x", "Nr of distinct values of \\(x_{i2}\\)",
-                  min = 1, max = 10, value = 6, step = 1),
-      fluidRow(
-        column(6, numericInput("x_min", "Smallest \\(x_{i2}\\)", value = 0, step = 0.5)),
-        column(6, numericInput("x_max", "Largest \\(x_{i2}\\)",  value = 5, step = 0.5))
+      checkboxInput("use_data",
+                    "Use the deep-sea fish survey as the design", value = FALSE),
+      conditionalPanel(
+        "input.use_data == true",
+        tags$p(style = "color:#777; font-size:90%;",
+               "\\(x_{i2}\\) is now the depth (km) at which each site was really",
+               "sampled, and the factor is the sampling period. The observed",
+               "abundances are drawn as black crosses.")
+      ),
+      conditionalPanel(
+        "input.use_data == false",
+        sliderInput("n_x", "Nr of distinct values of \\(x_{i2}\\)",
+                    min = 1, max = 10, value = 6, step = 1),
+        fluidRow(
+          column(6, numericInput("x_min", "Smallest \\(x_{i2}\\)", value = 0, step = 0.5)),
+          column(6, numericInput("x_max", "Largest \\(x_{i2}\\)",  value = 5, step = 0.5))
+        )
       ),
       sliderInput("n_rep", "Replicates per predictor value",
                   min = 1, max = 50, value = 10, step = 1),
@@ -327,6 +364,7 @@ server <- function(input, output, session) {
   })
 
   x_values <- reactive({
+    if (isTRUE(input$use_data)) return(sort(unique(FISH$depth_km)))
     lo <- input$x_min
     hi <- input$x_max
     validate(need(isTRUE(is.finite(lo)), "Fill in the smallest value of x."))
@@ -336,14 +374,21 @@ server <- function(input, output, session) {
     seq(lo, hi, length.out = input$n_x)
   })
 
-  # Spacing between neighbouring x values: sets how wide a distribution may be.
+  # How wide a distribution may be drawn. On a grid this is the gap between
+  # neighbouring x values; on the real design the depths are almost all
+  # distinct, so that gap is useless and we use a fraction of the range.
   spacing <- reactive({
     xv <- x_values()
+    if (isTRUE(input$use_data)) return(diff(range(xv))/20)
     if (length(xv) > 1) min(diff(sort(xv))) else 1
   })
 
   sim <- reactive({
-    d <- build_design(x_values(), isTRUE(input$use_factor), input$n_rep)
+    d <- if (isTRUE(input$use_data)) {
+      build_design_from_data(FISH, isTRUE(input$use_factor), input$n_rep)
+    } else {
+      build_design(x_values(), isTRUE(input$use_factor), input$n_rep)
+    }
     set.seed(seed())
     out <- simulate_glm(d, beta(), input$dist, pars())
     validate(need(all(is.finite(out$mu_i)) && max(out$mu_i) < 1e6, BLOWUP_MSG))
@@ -404,8 +449,13 @@ server <- function(input, output, session) {
         "Each sideways shape is the true distribution of \\(y_i\\) at that value of",
         "\\(x_{i2}\\), drawn from its baseline to the right. All shapes share one",
         "scale, so their widths are comparable."))
-    if (input$n_x > 1)
+    if (isTRUE(input$use_data) || input$n_x > 1)
       bits <- c(bits, "The line traces the true mean \\(\\mu_i\\).")
+    if (isTRUE(input$use_data))
+      bits <- c(bits, paste("Black crosses are the abundances that were really",
+                            "observed at those depths. Try to choose \\(\\beta_1\\)",
+                            "and \\(\\beta_2\\) so that the simulated cloud looks",
+                            "like the observed one."))
     withMathJax(tags$p(style = "color:#777; font-size:90%;", paste(bits, collapse = " ")))
   })
 
@@ -489,6 +539,13 @@ server <- function(input, output, session) {
       }
     }
 
+    # -- the observed fish abundances ---------------------------------------
+    if (isTRUE(input$use_data)) {
+      obs <- unique(sim()[, c("x_i2", "y_obs")])
+      p <- p + geom_point(data = obs, aes(x = x_i2, y = y_obs),
+                          shape = 4, size = 2, stroke = 0.8, colour = "black")
+    }
+
     if (use_f) p <- p + scale_colour_manual(values = GROUP_COLS)
     p
   })
@@ -498,8 +555,10 @@ server <- function(input, output, session) {
     keep <- c("i", "x_i1", "x_i2")
     if (isTRUE(input$use_factor)) keep <- c(keep, "group", "x_i3", "x_i4")
     keep <- c(keep, "eta_i", "mu_i", "var_i", "y_i")
+    if (isTRUE(input$use_data)) keep <- c(keep, "y_obs")
     d <- d[, keep, drop = FALSE]
     names(d)[names(d) == "var_i"] <- "var(y_i)"
+    names(d)[names(d) == "y_obs"] <- "y_i observed"
 
     DT::datatable(
       d,
