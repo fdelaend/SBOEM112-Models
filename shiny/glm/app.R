@@ -41,6 +41,15 @@ BLOWUP_MSG <- paste(
 #    eta <- X %*% beta + Z %*% u.
 # ---------------------------------------------------------------------------
 
+# Counts around the central mass of a Binomial, so that we do not draw a long
+# stretch of essentially zero probability when pi is close to 0 or to 1.
+trimmed_binom_support <- function(n, prob) {
+  lo <- max(0, qbinom(0.0005, n, prob) - 1)
+  hi <- min(n, qbinom(0.9995, n, prob) + 1)
+  if (hi <= lo) hi <- min(n, lo + 1)
+  lo:hi
+}
+
 DISTRIBUTIONS <- list(
   normal = list(
     label      = "Normal",
@@ -68,8 +77,12 @@ DISTRIBUTIONS <- list(
     variance   = function(mu, pars) mu,
     rand       = function(mu, pars) rpois(length(mu), lambda = mu),
     dens       = function(mu, pars) {
-      top <- max(1, min(qpois(0.9999, mu), 500))
-      y   <- 0:top
+      # Only the central mass: starting at 0 would draw a long stretch of
+      # essentially zero probability whenever mu is large.
+      lo <- qpois(0.0005, mu)
+      hi <- min(qpois(0.9995, mu), lo + 1000)
+      if (hi <= lo) hi <- lo + 1
+      y  <- lo:hi
       data.frame(y = y, d = dpois(y, lambda = mu))
     },
     uses_sigma = FALSE,
@@ -85,7 +98,7 @@ DISTRIBUTIONS <- list(
     variance   = function(mu, pars) mu * (1 - mu) / pars$n,
     rand       = function(mu, pars) rbinom(length(mu), size = pars$n, prob = mu) / pars$n,
     dens       = function(mu, pars) {
-      k <- 0:pars$n
+      k <- trimmed_binom_support(pars$n, mu)
       data.frame(y = k / pars$n, d = dbinom(k, size = pars$n, prob = mu))
     },
     uses_sigma = FALSE,
@@ -101,7 +114,7 @@ DISTRIBUTIONS <- list(
     variance   = function(mu, pars) mu * (1 - mu / pars$n),
     rand       = function(mu, pars) rbinom(length(mu), size = pars$n, prob = mu / pars$n),
     dens       = function(mu, pars) {
-      k <- 0:pars$n
+      k <- trimmed_binom_support(pars$n, mu / pars$n)
       data.frame(y = k, d = dbinom(k, size = pars$n, prob = mu / pars$n))
     },
     uses_sigma = FALSE,
@@ -471,23 +484,6 @@ server <- function(input, output, session) {
     # -- the true distributions, drawn sideways -----------------------------
     if (show_den) {
       sh <- shapes()
-      base <- do.call(rbind, lapply(
-        split(sh, list(sh$x0, sh$group), drop = TRUE),
-        function(z) data.frame(x0 = z$x0[1], group = z$group[1], mu = z$mu[1],
-                               ymin = min(z$y), ymax = max(z$y),
-                               stringsAsFactors = FALSE)
-      ))
-
-      # baseline of each distribution
-      p <- if (use_f) {
-        p + geom_segment(data = base,
-                         aes(x = x0, xend = x0, y = ymin, yend = ymax, colour = group),
-                         linewidth = 0.3, alpha = 0.5)
-      } else {
-        p + geom_segment(data = base,
-                         aes(x = x0, xend = x0, y = ymin, yend = ymax),
-                         linewidth = 0.3, alpha = 0.5, colour = GROUP_COLS[["A"]])
-      }
 
       # the distribution itself: spikes if D is discrete, a curve if continuous
       if (isTRUE(spec()$discrete)) {
