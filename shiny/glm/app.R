@@ -273,7 +273,8 @@ ui <- fluidPage(
       width = 4,
 
       tags$h4("1. Random component"),
-      selectInput("dist", "Distribution", choices = DIST_CHOICES),
+      selectInput("dist", "Distribution", choices = DIST_CHOICES,
+                  selected = "poisson"),
       conditionalPanel(
         "input.dist == 'normal'",
         sliderInput("sigma", "\\(\\sigma\\) (residual sd)", min = 0.05, max = 5,
@@ -354,7 +355,7 @@ ui <- fluidPage(
             conditionalPanel(
               "input.show != 'data'",
               sliderInput("n_dens", "At how many values of \\(x_{i2}\\)?",
-                          min = 1, max = 10, value = 4, step = 1, width = "320px")
+                          min = 1, max = 10, value = 10, step = 1, width = "320px")
             )
           ),
           plotOutput("plot", height = "460px"),
